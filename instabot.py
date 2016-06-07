@@ -11,6 +11,8 @@ import atexit
 import signal
 import itertools
 
+
+
 class InstaBot:
     """
     Instagram bot v 1.0
@@ -85,7 +87,9 @@ class InstaBot:
                 max_like_for_one_tag = 5,
                 unfollow_break_min=15,
                 unfollow_break_max=30,
-                log_mod = 0):
+                log_mod = 0,
+                prox = None
+                ):
 
         self.bot_start = datetime.datetime.now()
         self.unfollow_break_min = unfollow_break_min
@@ -124,22 +128,24 @@ class InstaBot:
         # log_mod 0 to console, 1 to file
         self.log_mod = log_mod
 
-        self.s = requests.Session()
-        # if you need proxy make something like this:
-        # self.s.proxies = {"https" : "http://proxyip:proxyport"}
-        # by @ageorgios
-
-        # convert login to lower
-        self.user_login = login.lower()
-        self.user_password = password
-
         self.media_by_tag = []
 
         now_time = datetime.datetime.now()
         log_string = 'Instabot v1.0.1 started at %s:\n' %\
                      (now_time.strftime("%d.%m.%Y %H:%M"))
         self.write_log(log_string)
-        self.login()
+        i=0
+        self.sessions=[]
+        while i<len(login):
+            i=i+1
+            self.s = requests.Session()
+            self.prox=prox[i-1]
+            self.s.proxies = prox[i-1]
+            self.user_login = login[i-1]
+            self.user_password = password[i-1]
+            self.login()
+            self.sessions.append(self.s)
+
 
         signal.signal(signal.SIGTERM, self.cleanup)
         atexit.register(self.cleanup)
@@ -152,7 +158,7 @@ class InstaBot:
                                's_network' : '', 'ds_user_id' : ''})
         self.login_post = {'username' : self.user_login,
                            'password' : self.user_password}
-        self.s.headers.update ({'Accept-Encoding' : 'gzip, deflate',
+        xxx= {'Accept-Encoding' : 'gzip, deflate',
                                'Accept-Language' : self.accept_language,
                                'Connection' : 'keep-alive',
                                'Content-Length' : '0',
@@ -161,18 +167,19 @@ class InstaBot:
                                'Referer' : 'https://www.instagram.com/',
                                'User-Agent' : self.user_agent,
                                'X-Instagram-AJAX' : '1',
-                               'X-Requested-With' : 'XMLHttpRequest'})
-        r = self.s.get(self.url)
+                               'X-Requested-With' : 'XMLHttpRequest'}
+        self.s.headers.update (xxx)
+        r = self.s.get(self.url , proxies=self.prox)
         self.s.headers.update({'X-CSRFToken' : r.cookies['csrftoken']})
         time.sleep(5 * random.random())
-        login = self.s.post(self.url_login, data=self.login_post,
+        login = self.s.post(self.url_login  , proxies=self.prox, data=self.login_post,
                             allow_redirects=True)
         self.s.headers.update({'X-CSRFToken' : login.cookies['csrftoken']})
         self.csrftoken = login.cookies['csrftoken']
         time.sleep(5 * random.random())
 
         if login.status_code == 200:
-            r = self.s.get('https://www.instagram.com/')
+            r = self.s.get('https://www.instagram.com/' , proxies=self.prox)
             finder = r.text.find(self.user_login)
             if finder != -1:
                 self.login_status = True
@@ -196,7 +203,8 @@ class InstaBot:
 
         try:
             logout_post = {'csrfmiddlewaretoken' : self.csrftoken}
-            logout = self.s.post(self.url_logout, data=logout_post)
+            for i in range(len(self.sessions)):
+                logout = self.sessions[i].post(self.url_logout, data=logout_post)
             self.write_log("Logout success!")
             self.login_status = False
         except:
@@ -229,7 +237,7 @@ class InstaBot:
             if self.login_status == 1:
                 url_tag = '%s%s%s' % (self.url_tag, tag, '/')
                 try:
-                    r = self.s.get(url_tag)
+                    r = self.s.get(url_tag )
                     text = r.text
 
                     finder_text_start = ('<script type="text/javascript">'
@@ -270,7 +278,9 @@ class InstaBot:
                             log_string = "Trying to like media: %s" %\
                                          (self.media_by_tag[i]['id'])
                             self.write_log(log_string)
+
                             like = self.like(self.media_by_tag[i]['id'])
+
                             # comment = self.comment(self.media_by_tag[i]['id'], 'Cool!')
                             # follow = self.follow(self.media_by_tag[i]["owner"]["id"])
                             if like != 0:
@@ -318,7 +328,9 @@ class InstaBot:
         if (self.login_status):
             url_likes = self.url_likes % (media_id)
             try:
-                like = self.s.post(url_likes)
+                for i in range(len(self.sessions)):
+                    like = self.sessions[i].post(url_likes)
+
                 last_liked_media_id = media_id
             except:
                 self.write_log("Except on like!")
@@ -330,7 +342,8 @@ class InstaBot:
         if (self.login_status):
             url_unlike = self.url_unlike % (media_id)
             try:
-                unlike = self.s.post(url_unlike)
+                for i in range(len(self.sessions)):
+                    unlike = self.sessions[i].post(url_unlike)
             except:
                 self.write_log("Except on unlike!")
                 unlike = 0
@@ -342,7 +355,9 @@ class InstaBot:
             comment_post = {'comment_text' : comment_text}
             url_comment = self.url_comment % (media_id)
             try:
-                comment = self.s.post(url_comment, data=comment_post)
+                for i in range(len(self.sessions)):
+
+                    comment = self.sessions[i].post(url_comment, data=comment_post)
                 if comment.status_code == 200:
                     self.comments_counter += 1
                     log_string = 'Write: "%s". #%i.' % (comment_text, self.comments_counter)
@@ -357,7 +372,9 @@ class InstaBot:
         if (self.login_status):
             url_follow = self.url_follow % (user_id)
             try:
-                follow = self.s.post(url_follow)
+                for i in range(len(self.sessions)):
+
+                    follow = self.sessions[i].post(url_follow)
                 if follow.status_code == 200:
                     self.follow_counter += 1
                     log_string = "Followed: %s #%i." % (user_id, self.follow_counter)
@@ -372,7 +389,8 @@ class InstaBot:
         if (self.login_status):
             url_unfollow = self.url_unfollow % (user_id)
             try:
-                unfollow = self.s.post(url_unfollow)
+                for i in range(len(self.sessions)):
+                    unfollow = self.sessions[i].post(url_unfollow)
                 if unfollow.status_code == 200:
                     self.unfollow_counter += 1
                     log_string = "Unfollow: %s #%i." % (user_id, self.unfollow_counter)
@@ -387,7 +405,9 @@ class InstaBot:
         if (self.login_status):
             url_unfollow = self.url_unfollow % (user_id)
             try:
-                unfollow = self.s.post(url_unfollow)
+                for i in range(len(self.sessions)):
+
+                    unfollow = self.sessions[i].post(url_unfollow)
                 if unfollow.status_code == 200:
                     self.unfollow_counter += 1
                     log_string = "Unfollow: %s #%i of %i." % (user_id, self.unfollow_counter, self.follow_counter)
